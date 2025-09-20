@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+// Импорт для timestamp (рекомендуется!)
+import "google/protobuf/timestamp.proto";
+
+// Сообщение для регистрации (расширяем логин)
+message RegisterRequest {
+  string username = 1;        // Логин
+  string password = 2;        // Пароль
+  string email = 3;           // Email для восстановления
+  string display_name = 4;    // Отображаемое имя
+}
+
+// Сообщение для входа
+message LoginRequest {
+  string username = 1;        // Логин
+  string password = 2;        // Пароль
+}
+
+// Ответ на авторизацию
+message AuthResponse {
+  bool success = 1;           // Успех авторизации
+  string user_id = 2;         // UUID пользователя
+  string error_message = 3;   // Сообщение об ошибке
+  string auth_token = 4;      // Токен для последующих запросов
+}
+
+// Базовое сообщение пользователя
+message User {
+  string user_id = 1;         // UUID пользователя
+  string username = 2;        // Логин
+  string display_name = 3;    // Отображаемое имя
+  UserStatus status = 4;      // Статус онлайн/оффлайн
+}
+
+// Текстовое сообщение чата
+message ChatMessage {
+  string message_id = 1;      // UUID сообщения
+  string user_id = 2;         // UUID отправителя
+  string text = 3;            // Текст сообщения
+  google.protobuf.Timestamp timestamp = 4;  // Временная метка
+  MessageType type = 5;       // Тип сообщения
+  string channel_id = 6;      // ID канала/чата
+}
+
+// Для голосовых сообщений
+message VoiceMessage {
+  bytes audio_data = 1;
+  int32 duration_seconds = 2;
+}
+
+// Для файлов
+message FileMessage {
+  string file_name = 1;
+  bytes file_data = 2;
+  int64 file_size = 3;
+}
+
+// Перечисление статусов пользователя
+enum UserStatus {
+  OFFLINE = 0;
+  ONLINE = 1;
+  AWAY = 2;
+  DO_NOT_DISTURB = 3;
+}
+
+// Перечисление типов сообщений
+enum MessageType {
+  TEXT = 0;
+  SYSTEM = 1;
+  JOIN = 2;
+  LEAVE = 3;
+}
+
+// Добавь это в начало, перед сообщениями
+enum CommandType {
+  UNKNOWN_COMMAND = 0;
+  REGISTER = 1;          // Команда "зарегистрировать"
+  LOGIN = 2;             // Команда "войти"
+  AUTH_RESPONSE = 3;     // Команда "ответ на авторизацию"
+  SEND_MESSAGE = 4;      // Команда "отправить сообщение"
+  SEND_VOICE = 5;        // Команда "отправить голосовое"
+  SEND_FILE = 6;         // Команда "отправить файл"
+  USER_UPDATE = 7;       // Команда "обновить пользователя"
+}
+
+// Сообщение-обертка для всех типов
+message ServerMessage {
+  MessageType type = 1;
+  oneof message_content {
+    LoginRequest login_request = 2;
+    RegisterRequest register_request = 3;
+    AuthResponse auth_response = 4;
+    ChatMessage chat_message = 5;
+    User user_update = 6;
+  }
+  google.protobuf.Timestamp timestamp = 7;
+}
