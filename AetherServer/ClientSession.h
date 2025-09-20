@@ -1,22 +1,27 @@
 #pragma once
+
 #include <asio.hpp>
 #include <memory>
-#include <unordered_set>
-#include <iostream>
+#include <array>
 #include <string>
-#include <vector>
+#include <iostream>
 
 class ClientSession : public std::enable_shared_from_this<ClientSession> {
 public:
-    ClientSession(asio::ip::tcp::socket socket);
+    explicit ClientSession(asio::ip::tcp::socket socket);
+    ~ClientSession();
+
     void start();
-    void send(const std::string& message);
+    void sendMessage(const std::string& message);
+    std::string getClientInfo() const;
+    bool isConnected() const;
 
 private:
     void do_read();
-    void do_write(std::size_t length);
+    void handleMessage(const std::string& message);
 
     asio::ip::tcp::socket socket_;
-    std::vector<char> buffer_;  // Используем vector вместо array
-    std::size_t bytes_read_{ 0 };
+    std::array<char, 8192> buffer_; // Увеличил буфер для больших сообщений
+    std::string client_address_;
+    bool connected_ = false;
 };
