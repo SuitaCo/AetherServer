@@ -1,73 +1,60 @@
 ﻿// AetherServer.cpp : Этот файл содержит функцию "main". Здесь начинается и заканчивается выполнение программы.
 //
 #include "Server.h"
+#include "ClientManager.h"
 #include <asio.hpp>
 #include <iostream>
 #include <csignal>
-#include <atomic>
-#include <locale>
-#include <codecvt>
-#include <io.h>
-#include <fcntl.h>
+#include <windows.h>
 
-void setup_console_encoding() {
-    // Устанавливаем локаль для консоли
-    setlocale(LC_ALL, "Russian");
+// Глобальные переменные для обработки сигналов
+std::unique_ptr<Server> server_ptr;
 
-    // Настраиваем кодировку вывода для Windows
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
+BOOL WINAPI ConsoleHandler(DWORD signal) {
+    if (signal == CTRL_C_EVENT) {
+        std::cout << "\nReceived Ctrl+C, shutting down server..." << std::endl;
 
-    // Для широких символов
-    std::wcout.imbue(std::locale("Russian"));
-    std::cout.imbue(std::locale("Russian"));
-}
+        // Останавливаем сервер
+        if (server_ptr) {
+            server_ptr->stop();
+        }
 
-std::unique_ptr<Server> server;
-std::atomic<bool> running{ true };
+        // Показываем статистику клиентов
+        std::cout << "Final client count: "
+            << ClientManager::getInstance().getClientCount() << std::endl;
 
-void signal_handler(int signum) {
-    std::cout << "\nReceived signal " << signum << ", shutting down server..." << std::endl;
-    running = false;
-    if (server) {
-        server->stop();
+        exit(0);
     }
+    return TRUE;
 }
 
 int main() {
-    setup_console_encoding();
     try {
+        // Настраиваем обработчик Ctrl+C
+        SetConsoleCtrlHandler(ConsoleHandler, TRUE);
+
+        // Создаем io_context
         asio::io_context io_context;
 
-        // Регистрируем обработчик сигналов для graceful shutdown
-        std::signal(SIGINT, signal_handler);
-        std::signal(SIGTERM, signal_handler);
-
         // Создаем сервер на порту 33333
-        server = std::make_unique<Server>(io_context, 33333);
-        server->start();
+        server_ptr = std::make_unique<Server>(io_context, 33333);
 
-        std::cout << "TCP Server started. Press Ctrl+C to stop." << std::endl;
+        // Запускаем сервер
+        server_ptr->start();
 
-        // Запускаем обработку событий
-        while (running) {
-            try {
-                io_context.run();
-                break; // run() завершится когда не останется работы
-            }
-            catch (const std::exception& e) {
-                std::cerr << "Exception in io_context.run(): " << e.what() << std::endl;
-                if (!running) break;
-            }
-        }
+        std::cout << "Server is running on " << server_ptr->getEndpointInfo() << std::endl;
+        std::cout << "Connect using: telnet localhost 33333" << std::endl;
+        std::cout << "Press Ctrl+C to stop the server" << std::endl;
+
+        // Запускаем цикл обработки событий
+        io_context.run();
 
     }
     catch (const std::exception& e) {
-        std::cerr << "Exception: " << e.what() << std::endl;
+        std::cerr << "Fatal error: " << e.what() << std::endl;
         return 1;
     }
 
-    std::cout << "Server stopped gracefully." << std::endl;
     return 0;
 }
 

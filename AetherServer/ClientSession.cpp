@@ -1,73 +1,122 @@
-#include "ClientSession.h"
-#include <iostream>
+п»ї#include "ClientSession.h"
+#include "ClientManager.h"
 
 ClientSession::ClientSession(asio::ip::tcp::socket socket)
-    : socket_(std::move(socket)), buffer_(1024) {  // Инициализируем buffer_
+    : socket_(std::move(socket))
+    , connected_(false) {
+
+    try {
+        // РџРѕР»СѓС‡Р°РµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ РєР»РёРµРЅС‚Рµ
+        auto endpoint = socket_.remote_endpoint();
+        client_address_ = endpoint.address().to_string() + ":" +
+            std::to_string(endpoint.port());
+    }
+    catch (const std::exception& e) {
+        client_address_ = "unknown";
+    }
+
+    std::cout << "ClientSession created: " << client_address_ << std::endl;
+}
+
+ClientSession::~ClientSession() {
+    if (connected_) {
+        std::cout << "ClientSession destroyed: " << client_address_ << std::endl;
+    }
 }
 
 void ClientSession::start() {
+    if (connected_) {
+        return;
+    }
+
+    connected_ = true;
+
+    // Р”РѕР±Р°РІР»СЏРµРј РІ РјРµРЅРµРґР¶РµСЂ РєР»РёРµРЅС‚РѕРІ
+    ClientManager::getInstance().addClient(shared_from_this());
+
+    std::cout << "Session started: " << client_address_ << std::endl;
+
+    // РћС‚РїСЂР°РІР»СЏРµРј РїСЂРёРІРµС‚СЃС‚РІРµРЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ
+    sendMessage("Welcome to server! Your address: " + client_address_ + "\r\n");
+
+    // РќР°С‡РёРЅР°РµРј Р°СЃРёРЅС…СЂРѕРЅРЅРѕРµ С‡С‚РµРЅРёРµ
+    do_read();
+}
+
+void ClientSession::sendMessage(const std::string& message) {
+    if (!connected_) {
+        return;
+    }
+
+    // РЎРёРЅС…СЂРѕРЅРЅР°СЏ РѕС‚РїСЂР°РІРєР° (РґР»СЏ РїСЂРѕСЃС‚РѕС‚С‹)
     try {
-        std::cout << "Client connected: "
-            << socket_.remote_endpoint().address().to_string()
-            << ":" << socket_.remote_endpoint().port() << std::endl;
-        do_read();
+        asio::write(socket_, asio::buffer(message + "\r\n"));
     }
     catch (const std::exception& e) {
-        std::cerr << "Error in start: " << e.what() << std::endl;
+        std::cerr << "Send error to " << client_address_ << ": " << e.what() << std::endl;
+        connected_ = false;
     }
+}
+
+std::string ClientSession::getClientInfo() const {
+    return client_address_;
+}
+
+bool ClientSession::isConnected() const {
+    return connected_;
 }
 
 void ClientSession::do_read() {
+    if (!connected_) {
+        return;
+    }
+
     auto self(shared_from_this());
 
-    socket_.async_read_some(asio::buffer(buffer_),
+    socket_.async_read_some(
+        asio::buffer(buffer_),
         [this, self](std::error_code ec, std::size_t length) {
             if (!ec) {
-                bytes_read_ = length;
-
-                // Создаем копию данных для безопасного использования
+                // РџСЂРµРѕР±СЂР°Р·СѓРµРј РїРѕР»СѓС‡РµРЅРЅС‹Рµ РґР°РЅРЅС‹Рµ РІ СЃС‚СЂРѕРєСѓ
                 std::string message(buffer_.data(), length);
-                std::cout << "Received from client "  + socket_.remote_endpoint().address().to_string() + ": " << message << std::endl;
 
-                // Эхо-ответ: отправляем обратно те же данные
-                do_write(length);
+                // РћР±СЂР°Р±Р°С‚С‹РІР°РµРј СЃРѕРѕР±С‰РµРЅРёРµ
+                handleMessage(message);
 
-            }
-            else {
-                if (ec != asio::error::eof) {
-                    std::cerr << "Read error: " << ec.message() << std::endl;
-                }
-                std::cout << "Client disconnected" << std::endl;
-            }
-        });
-}
-
-void ClientSession::do_write(std::size_t length) {
-    auto self(shared_from_this());
-
-    // Используем буфер напрямую, без создания временных строк
-    asio::async_write(socket_, asio::buffer(buffer_.data(), length),
-        [this, self](std::error_code ec, std::size_t /*length*/) {
-            if (!ec) {
-                // Продолжаем чтение только после успешной записи
+                // РџСЂРѕРґРѕР»Р¶Р°РµРј С‡С‚РµРЅРёРµ
                 do_read();
             }
             else {
-                std::cerr << "Write error: " << ec.message() << std::endl;
+                // РћС€РёР±РєР° РёР»Рё РѕС‚РєР»СЋС‡РµРЅРёРµ
+                connected_ = false;
+
+                if (ec == asio::error::eof) {
+                    std::cout << "Client disconnected: " << client_address_ << std::endl;
+                }
+                else {
+                    std::cerr << "Read error from " << client_address_ << ": " << ec.message() << std::endl;
+                }
+
+                // РЈРґР°Р»СЏРµРј РёР· РјРµРЅРµРґР¶РµСЂР°
+                ClientManager::getInstance().removeClient(shared_from_this());
             }
-        });
+        }
+    );
 }
 
-void ClientSession::send(const std::string& message) {
-    // Создаем копию сообщения для асинхронной операции
-    auto self(shared_from_this());
-    auto message_copy = std::make_shared<std::string>(message);
+void ClientSession::handleMessage(const std::string& message) {
+    // РЈР±РёСЂР°РµРј Р»РёС€РЅРёРµ СЃРёРјРІРѕР»С‹ (РІРѕР·РІСЂР°С‚ РєР°СЂРµС‚РєРё, РїРµСЂРµРІРѕРґ СЃС‚СЂРѕРєРё)
+    std::string clean_message = message;
+    clean_message.erase(std::remove(clean_message.begin(), clean_message.end(), '\r'), clean_message.end());
+    clean_message.erase(std::remove(clean_message.begin(), clean_message.end(), '\n'), clean_message.end());
 
-    asio::async_write(socket_, asio::buffer(*message_copy),
-        [this, self, message_copy](std::error_code ec, std::size_t /*length*/) {
-            if (ec) {
-                std::cerr << "Send error: " << ec.message() << std::endl;
-            }
-        });
+    if (clean_message.empty()) {
+        return;
+    }
+
+    std::cout << "From " << client_address_ << ": " << clean_message << std::endl;
+
+    // Р Р°СЃСЃС‹Р»Р°РµРј СЃРѕРѕР±С‰РµРЅРёРµ РІСЃРµРј РєР»РёРµРЅС‚Р°Рј
+    std::string broadcast_msg = "[" + client_address_ + "]: " + clean_message;
+    ClientManager::getInstance().broadcastMessage(broadcast_msg);
 }
-
